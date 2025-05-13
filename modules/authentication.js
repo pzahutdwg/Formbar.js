@@ -18,6 +18,10 @@ function isAuthenticated(req, res, next) {
 		logger.log('info', `[isAuthenticated] url=(${req.url}) ip=(${req.ip}) session=(${JSON.stringify(req.session)})`)
 
 		if (req.session.email) {
+			console.log("User:");
+			
+			console.log(classInformation.users[req.session.email]);
+			
 			if (classInformation.users[req.session.email].activeClasses.length == 0) {
 				if (classInformation.users[req.session.email].permissions >= MANAGER_PERMISSIONS || classInformation.users[req.session.email].permissions >= TEACHER_PERMISSIONS) {
 					res.render("pages/news");
