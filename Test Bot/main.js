@@ -14,8 +14,9 @@ process.on('unhandledRejection', (reason, promise) => {
     console.log('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-function makeDisplayName(i) {
-    return `guest${i}`.padEnd(5, '_');
+let nextGuestId = 1;
+function makeDisplayName() {
+    return `guest${nextGuestId++}`.padEnd(5, '_');
 }
 
 async function createFakeGuest(displayName) {
@@ -173,6 +174,16 @@ async function testConnectivity() {
     }
 }
 
+/*
+::::::::::: ::::    ::: ::::::::::: :::::::::: :::::::::      :::      :::::::: :::::::::::
+    :+:     :+:+:   :+:     :+:     :+:        :+:    :+:   :+: :+:   :+:    :+:    :+:
+    +:+     :+:+:+  +:+     +:+     +:+        +:+    +:+  +:+   +:+  +:+           +:+
+    +#+     +#+ +:+ +#+     +#+     +#++:++#   +#++:++#:  +#++:++#++: +#+           +#+
+    +#+     +#+  +#+#+#     +#+     +#+        +#+    +#+ +#+     +#+ +#+           +#+
+    #+#     #+#   #+#+#     #+#     #+#        #+#    #+# #+#     #+# #+#    #+#    #+#
+########### ###    ####     ###     ########## ###    ### ###     ###  ########     ###
+*/
+
 async function simulatePollInteractions() {
     if (userSessions.length === 0) {
         console.log('No active user sessions available for poll interactions');
@@ -188,13 +199,17 @@ async function simulatePollInteractions() {
     console.log('  test - Test basic server connectivity');
     console.log('  stop - Stop the simulation');
     console.log('  exit - Exit the program');
-    console.log('  leave <count> - "count" users leave the active class\n')
+    console.log('  leave <count> - "count" users leave the active class')
+    console.log('  more <count> - "count" users joing the room');
+    console.log('  break <count> - "count" users request a break');
+    console.log('  help <count> - "count" users request help');
 
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', async (input) => {
         const command = input.trim();
         if (command === 'exit') {
             process.exit(0);
+
         } else if (command === 'stop') {
             console.log('Poll simulation stopped. Waiting for new commands...');
 
@@ -205,6 +220,7 @@ async function simulatePollInteractions() {
             if (userSessions.length > 0) {
                 await debugStudentPage(userSessions[0]);
             }
+
         } else if
             (command === 'options') {
             if (userSessions.length > 0) {
@@ -231,33 +247,38 @@ async function simulatePollInteractions() {
         } else if (command.startsWith('random ')) {
             const optionsStr = command.substring(7).trim();
             const options = optionsStr.split(',').map(opt => opt.trim());
+
             if (options.length === 0) {
                 console.log('Please provide options separated by commas (e.g., "random True,False")');
                 return;
             }
+
             console.log(`Making users vote randomly from options: ${options.join(', ')}`);
             // Vote in parallel
             const votePromises = userSessions.map(session => {
                 const randomOption = options[Math.floor(Math.random() * options.length)];
                 return submitPollResponse(session, randomOption);
             });
+
             const results = await Promise.all(votePromises);
             const successful = results.filter(r => r).length;
             console.log(`Random vote completed: ${successful}/${userSessions.length} users voted successfully`);
+
         } else if (command.startsWith('leave ')) {
-            const count = command.substring(6).trim();
+            const count = Number(command.substring(6).trim());
             if (!count) {
                 console.log('Please provide an amount of users.');
                 return;
             }
             console.log(`Making ${count} users leave the room.`);
-            // Leave the room
-            for (let i = 0; i < Math.min(Number(count), userSessions.length); i++) {
-                const session = userSessions[i];
+            let toRemove = Math.min(count, userSessions.length);
+            while (toRemove-- > 0) {
+                const session = userSessions[0];
                 if (session && session.socket) {
                     session.socket.emit('leaveRoom');
                     console.log(`User ${session.name} left the room.`);
                 }
+                userSessions.shift();
             }
         } else if (command.startsWith('more ')) {
             const count = command.substring(5).trim();
@@ -266,52 +287,71 @@ async function simulatePollInteractions() {
                 return;
             }
             console.log(`Making ${count} users join the room.`);
-            addMoreGuests(count)
+            createGuests(count).catch(err => console.error('Fatal error:', err));
+
+        } else if (command.startsWith('break ')) {
+            const count = command.substring(6).trim();
+            if (!count) {
+                console.log('Please provide an amount of users.');
+                return;
+            }
+
+            for (let i = 0; i < Math.min(Number(count), userSessions.length); i++) {
+                const session = userSessions[i];
+                if (session && session.socket) {
+                    session.socket.emit('requestBreak', `${session.name} wants to take a break.`);
+                }
+            }
+
+        } else if (command.startsWith('help ')) {
+            const count = command.substring(5).trim();
+            if (!count) {
+                console.log('Please provide an amount of users.');
+                return;
+            }
+
+            for (let i = 0; i < Math.min(Number(count), userSessions.length); i++) {
+                const session = userSessions[i];
+                if (session && session.socket) {
+                    session.socket.emit('help', `${session.name} needs help.`);
+                }
+            }
+
         } else if (command.trim() !== '') {
             console.log('Unknown command. Available commands: options, vote <id>, random <id1,id2,...>, single <id>, debug, test, stop, exit');
         }
     });
 }
 /*
-                                                                                         ##
-                                                                                          ##        #               #
-                                              #                                           ##       ###             ###
-                                             ##                                           ##        #               #
-                                             ##                                           ##
-   /###   ###  /###     /##       /###     ######## /##          /###   ###  /###     ### ##      ###      /###   ###   ###  /###
-  / ###  / ###/ #### / / ###     / ###  / ######## / ###        / ###  / ###/ #### / #########     ###    / ###  / ###   ###/ #### /
- /   ###/   ##   ###/ /   ###   /   ###/     ##   /   ###      /   ###/   ##   ###/ ##   ####       ##   /   ###/   ##    ##   ###/
-##          ##       ##    ### ##    ##      ##  ##    ###    ##    ##    ##    ##  ##    ##        /   ##    ##    ##    ##    ##
-##          ##       ########  ##    ##      ##  ########     ##    ##    ##    ##  ##    ##       /    ##    ##    ##    ##    ##
-##          ##       #######   ##    ##      ##  #######      ##    ##    ##    ##  ##    ##      ###   ##    ##    ##    ##    ##
-##          ##       ##        ##    ##      ##  ##           ##    ##    ##    ##  ##    ##       ###  ##    ##    ##    ##    ##
-###     /   ##       ####    / ##    /#      ##  ####    /    ##    /#    ##    ##  ##    /#        ### ##    ##    ##    ##    ##
- ######/    ###       ######/   ####/ ##     ##   ######/      ####/ ##   ###   ###  ####/           ### ######     ### / ###   ###
-  #####      ###       #####     ###   ##     ##   #####        ###   ##   ###   ###  ###             ##  ####       ##/   ###   ###
-                                                                                                      ##
-                                                                                                      /
-                                                                                                     /
-                                                                                                    /
+ ::::::::  :::::::::  ::::::::::     ::: ::::::::::: ::::::::::
+:+:    :+: :+:    :+: :+:          :+: :+:   :+:     :+:
++:+        +:+    +:+ +:+         +:+   +:+  +:+     +:+
++#+        +#++:++#:  +#++:++#   +#++:++#++: +#+     +#++:++#
++#+        +#+    +#+ +#+        +#+     +#+ +#+     +#+
+#+#    #+# #+#    #+# #+#        #+#     #+# #+#     #+#
+ ########  ###    ### ########## ###     ### ###     ##########
 */
-async function createGuests() {
+async function createGuests(count) {
     console.log('Creating fake guest users...');
-    const batchSize = Math.ceil(guestCount / 3); //! Change this eventually (maybe)
-    for (let batch = 0; batch < Math.ceil(guestCount / batchSize); batch++) {
+    const batchSize = count < 4 ? 1 : Math.ceil(count / 3);
+    let added = 0;
+    for (let batch = 0; added < count; batch++) {
         const batchPromises = [];
-        const start = batch * batchSize + 1;
-        const end = Math.min((batch + 1) * batchSize, guestCount);
+        const start = added + 1;
+        const end = Math.min(added + batchSize, count);
         console.log(`Creating batch ${batch + 1}: guests ${start}-${end}`);
         for (let i = start; i <= end; i++) {
-            const name = makeDisplayName(i);
+            const name = makeDisplayName();
             batchPromises.push(createFakeGuest(name));
         }
+        added += (end - start + 1);
         const batchResults = await Promise.allSettled(batchPromises);
         batchResults.forEach((result, index) => {
             if (result.status === 'rejected') {
                 console.log(`Failed to create guest${start + index}:`, result.reason);
             }
         });
-        if (batch < Math.ceil(guestCount / batchSize) - 1) {
+        if (added < count) {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
@@ -321,25 +361,27 @@ async function createGuests() {
         const cookies = session.jar.getCookiesSync(URL);
         console.log(`Session ${index + 1}: ${session.name}, Cookie count: ${cookies.length}`);
     });
-    await simulatePollInteractions();
+    if (!inited) await simulatePollInteractions();
+    inited = true
 }
 
-async function addMoreGuests(count) {
-    console.log(`Adding ${count} more guest users...`);
-    const start = userSessions.length + 1;
-    const end = userSessions.length + count;
-    const batchPromises = [];
-    for (let i = start; i <= end; i++) {
-        const name = makeDisplayName(i);
-        batchPromises.push(createFakeGuest(name));
-    }
-    const batchResults = await Promise.allSettled(batchPromises);
-    batchResults.forEach((result, index) => {
-        if (result.status === 'rejected') {
-            console.log(`Failed to create guest${start + index}:`, result.reason);
-        }
-    });
-    console.log(`Finished adding guests. Total active sessions: ${userSessions.length}`);
-}
+// async function addMoreGuests(count) {
+//     console.log(`Adding ${count} more guest users...`);
+//     const start = userSessions.length + 1;
+//     const end = userSessions.length + count;
+//     const batchPromises = [];
+//     for (let i = start; i <= end; i++) {
+//         const name = makeDisplayName(i);
+//         batchPromises.push(createFakeGuest(name));
+//     }
+//     const batchResults = await Promise.allSettled(batchPromises);
+//     batchResults.forEach((result, index) => {
+//         if (result.status === 'rejected') {
+//             console.log(`Failed to create guest${start + index}:`, result.reason);
+//         }
+//     });
+//     console.log(`Finished adding guests. Total active sessions: ${userSessions.length}`);
+// }
 
-createGuests().catch(err => console.error('Fatal error:', err));
+let inited
+createGuests(guestCount).catch(err => console.error('Fatal error:', err));
