@@ -8,8 +8,6 @@ const URL = 'http://localhost:420';
 // const classID = 'ny7u';
 const classID = '93nt'
 const guestCount = 30
-
-const guestCount = 250;
 const userSessions = [];
 
 process.on('unhandledRejection', (reason, promise) => {
