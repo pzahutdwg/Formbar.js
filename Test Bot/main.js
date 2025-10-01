@@ -6,7 +6,7 @@ const io = require('socket.io-client');
 const URL = 'http://localhost:420';
 // const URL = 'http://172.16.3.129:420';
 // const classID = 'ny7u';
-const classID = '93nt'
+const classID = 'w7zt'
 const guestCount = 30
 const userSessions = [];
 
@@ -92,15 +92,13 @@ async function createFakeGuest(displayName) {
 async function getPollOptions(session) {
     const response = await session.client.get(`${URL}/student`);
     const $ = cheerio.load(response.data);
-    // Look for poll buttons only inside #studentVBar
+    // Find buttons with name="poll" inside #studentVBar
     const options = [];
-    $('#studentVBar button').each((i, el) => {
+    $('#studentVBar button[name="poll"]').each((_, el) => {
+        console.log(_, el)
         const idAttr = $(el).attr('id');
         const label = $(el).text().trim();
-        // Exclude known non-poll buttons
-        if (idAttr && label && !['logoutButton', 'cancel'].includes(idAttr)) {
-            options.push({ id: idAttr, label });
-        }
+        options.push({ id: idAttr, label });
     });
     console.log('Available poll options:');
     options.forEach(opt => console.log('  id:', opt.id, 'label:', opt.label));
@@ -200,9 +198,11 @@ async function simulatePollInteractions() {
     console.log('  stop - Stop the simulation');
     console.log('  exit - Exit the program');
     console.log('  leave <count> - "count" users leave the active class')
-    console.log('  more <count> - "count" users joing the room');
+    console.log('  more <count> - "count" users join the room');
     console.log('  break <count> - "count" users request a break');
     console.log('  help <count> - "count" users request help');
+    console.log('  randAction - Users make random actions\n');
+
 
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', async (input) => {
@@ -317,6 +317,15 @@ async function simulatePollInteractions() {
                 }
             }
 
+        } else if (command == 'randAction') {
+            for (let session of userSessions) {
+                const action = Math.floor(Math.random() * 3) + 1;
+                if (action == 2) {
+                    session.socket.emit('requestBreak', `${session.name} wants to take a break.`)
+                } else if (action == 3) {
+                    session.socket.emit('help', `${session.name} needs help.`)
+                }
+            }
         } else if (command.trim() !== '') {
             console.log('Unknown command. Available commands: options, vote <id>, random <id1,id2,...>, single <id>, debug, test, stop, exit');
         }
