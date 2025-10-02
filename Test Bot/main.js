@@ -6,7 +6,7 @@ const io = require('socket.io-client');
 const URL = 'http://localhost:420';
 // const URL = 'http://172.16.3.129:420';
 // const classID = 'ny7u';
-const classID = 'w7zt'
+const classID = '93nt'
 const guestCount = 30
 const userSessions = [];
 
@@ -172,21 +172,7 @@ async function testConnectivity() {
     }
 }
 
-/*
-::::::::::: ::::    ::: ::::::::::: :::::::::: :::::::::      :::      :::::::: :::::::::::
-    :+:     :+:+:   :+:     :+:     :+:        :+:    :+:   :+: :+:   :+:    :+:    :+:
-    +:+     :+:+:+  +:+     +:+     +:+        +:+    +:+  +:+   +:+  +:+           +:+
-    +#+     +#+ +:+ +#+     +#+     +#++:++#   +#++:++#:  +#++:++#++: +#+           +#+
-    +#+     +#+  +#+#+#     +#+     +#+        +#+    +#+ +#+     +#+ +#+           +#+
-    #+#     #+#   #+#+#     #+#     #+#        #+#    #+# #+#     #+# #+#    #+#    #+#
-########### ###    ####     ###     ########## ###    ### ###     ###  ########     ###
-*/
-
-async function simulatePollInteractions() {
-    if (userSessions.length === 0) {
-        console.log('No active user sessions available for poll interactions');
-        return;
-    }
+function printCommands() {
     console.log('\nStarting poll interaction simulation...');
     console.log('Commands:');
     console.log('  options - Show current poll options');
@@ -202,7 +188,25 @@ async function simulatePollInteractions() {
     console.log('  break <count> - "count" users request a break');
     console.log('  help <count> - "count" users request help');
     console.log('  randAction - Users make random actions\n');
+}
 
+/*
+::::::::::: ::::    ::: ::::::::::: :::::::::: :::::::::      :::      :::::::: :::::::::::
+    :+:     :+:+:   :+:     :+:     :+:        :+:    :+:   :+: :+:   :+:    :+:    :+:
+    +:+     :+:+:+  +:+     +:+     +:+        +:+    +:+  +:+   +:+  +:+           +:+
+    +#+     +#+ +:+ +#+     +#+     +#++:++#   +#++:++#:  +#++:++#++: +#+           +#+
+    +#+     +#+  +#+#+#     +#+     +#+        +#+    +#+ +#+     +#+ +#+           +#+
+    #+#     #+#   #+#+#     #+#     #+#        #+#    #+# #+#     #+# #+#    #+#    #+#
+########### ###    ####     ###     ########## ###    ### ###     ###  ########     ###
+*/
+
+async function simulatePollInteractions() {
+    if (userSessions.length === 0) {
+        console.log('No active user sessions available for poll interactions');
+        return;
+    }
+    
+    printCommands()
 
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', async (input) => {
@@ -322,12 +326,15 @@ async function simulatePollInteractions() {
                 const action = Math.floor(Math.random() * 3) + 1;
                 if (action == 2) {
                     session.socket.emit('requestBreak', `${session.name} wants to take a break.`)
+                    console.log(`${session.name} wants to take a break.`)
                 } else if (action == 3) {
                     session.socket.emit('help', `${session.name} needs help.`)
+                    console.log(`${session.name} needs help.`);
                 }
             }
         } else if (command.trim() !== '') {
-            console.log('Unknown command. Available commands: options, vote <id>, random <id1,id2,...>, single <id>, debug, test, stop, exit');
+            console.log('Invalid command. Here are the available commands:') 
+            printCommands()
         }
     });
 }
@@ -373,24 +380,6 @@ async function createGuests(count) {
     if (!inited) await simulatePollInteractions();
     inited = true
 }
-
-// async function addMoreGuests(count) {
-//     console.log(`Adding ${count} more guest users...`);
-//     const start = userSessions.length + 1;
-//     const end = userSessions.length + count;
-//     const batchPromises = [];
-//     for (let i = start; i <= end; i++) {
-//         const name = makeDisplayName(i);
-//         batchPromises.push(createFakeGuest(name));
-//     }
-//     const batchResults = await Promise.allSettled(batchPromises);
-//     batchResults.forEach((result, index) => {
-//         if (result.status === 'rejected') {
-//             console.log(`Failed to create guest${start + index}:`, result.reason);
-//         }
-//     });
-//     console.log(`Finished adding guests. Total active sessions: ${userSessions.length}`);
-// }
 
 let inited
 createGuests(guestCount).catch(err => console.error('Fatal error:', err));
