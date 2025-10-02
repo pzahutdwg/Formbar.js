@@ -4,10 +4,10 @@ const cheerio = require('cheerio');
 const io = require('socket.io-client');
 
 const URL = 'http://localhost:420';
-// const URL = 'http://172.16.3.129:420';
-// const classID = 'ny7u';
-const classID = '93nt'
-const guestCount = 30
+// const URL = 'http://172.16.3.130:420';
+const classID = '93nt';
+// const classID = 'p6kb'
+const guestCount = 24
 const userSessions = [];
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -25,12 +25,12 @@ async function createFakeGuest(displayName) {
     const client = wrapper(axios.create({
         jar,
         withCredentials: true,
-        timeout: 5000,
+        timeout: 0, //! Maybe change this later
         validateStatus: (status) => status < 500
     }));
 
     try {
-        await new Promise(resolve => setTimeout(resolve, Math.random() * 1000));
+        await new Promise(resolve => setTimeout(resolve, Math.random() * 0)); //! Maybe change this later
         const loginResponse = await client.post(
             `${URL}/login`,
             new URLSearchParams({ displayName, loginType: 'guest' }),
@@ -42,7 +42,7 @@ async function createFakeGuest(displayName) {
         }
         // console.log(`✓ ${displayName} logged in (status ${loginResponse.status})`);
 
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 0));
         const classResponse = await client.post(
             `${URL}/selectClass`,
             new URLSearchParams({ key: classID }),
@@ -90,19 +90,24 @@ async function createFakeGuest(displayName) {
 }
 
 async function getPollOptions(session) {
-    const response = await session.client.get(`${URL}/student`);
-    const $ = cheerio.load(response.data);
-    // Find buttons with name="poll" inside #studentVBar
-    const options = [];
-    $('#studentVBar button[name="poll"]').each((_, el) => {
-        console.log(_, el)
-        const idAttr = $(el).attr('id');
-        const label = $(el).text().trim();
-        options.push({ id: idAttr, label });
-    });
-    console.log('Available poll options:');
-    options.forEach(opt => console.log('  id:', opt.id, 'label:', opt.label));
-    return options;
+    try {
+        const response = await session.client.get(`${URL}/student`, {
+            responseType: 'text'
+        });
+        const $ = cheerio.load(response.data);
+        const options = [];
+        // Try to select poll buttons more flexibly if the name attribute is not present
+        $('button[name="poll"], button.poll, input[type="radio"][name="poll"]').each((_, el) => {
+            options.push({
+                id: $(el).attr('id') || $(el).val() || $(el).attr('value'),
+                text: $(el).text().trim() || $(el).val() || $(el).attr('value')
+            });
+        });
+        return options.length ? options : 'No poll options found';
+    } catch (error) {
+        console.error("Error fetching poll options:", error);
+        return null;
+    }
 }
 
 async function submitPollResponse(session, optionId) {
@@ -155,10 +160,10 @@ async function debugStudentPage(session) {
 async function testConnectivity() {
     console.log('\n=== TESTING BASIC CONNECTIVITY ===');
     try {
-        const response = await axios.get(URL, { timeout: 3000 });
+        const response = await axios.get(URL, { timeout: 0 });
         console.log(`✓ Server is reachable. Status: ${response.status}`);
         console.log(`✓ Content-Type: ${response.headers['content-type']}`);
-        const studentResponse = await axios.get(`${URL}/student`, { timeout: 3000 });
+        const studentResponse = await axios.get(`${URL}/student`, { timeout: 0 });
         console.log(`✓ Student page accessible. Status: ${studentResponse.status}`);
         return true;
     } catch (error) {
@@ -228,7 +233,7 @@ async function simulatePollInteractions() {
         } else if
             (command === 'options') {
             if (userSessions.length > 0) {
-                await getPollOptions(userSessions[0]);
+                console.log(await getPollOptions(userSessions[0]))
             }
 
         } else if (command.startsWith('single ')) {
@@ -323,11 +328,11 @@ async function simulatePollInteractions() {
 
         } else if (command == 'randAction') {
             for (let session of userSessions) {
-                const action = Math.floor(Math.random() * 3) + 1;
-                if (action == 2) {
+                const action = Math.floor(Math.random() * 10) + 1;
+                if (action == 9) {
                     session.socket.emit('requestBreak', `${session.name} wants to take a break.`)
                     console.log(`${session.name} wants to take a break.`)
-                } else if (action == 3) {
+                } else if (action == 10) {
                     session.socket.emit('help', `${session.name} needs help.`)
                     console.log(`${session.name} needs help.`);
                 }
@@ -367,9 +372,12 @@ async function createGuests(count) {
                 console.log(`Failed to create guest${start + index}:`, result.reason);
             }
         });
-        if (added < count) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
+
+        // Timeout between batches
+
+        // if (added < count) {
+        //     await new Promise(resolve => setTimeout(resolve, 1000));
+        // }
     }
     console.log(`\nFinished creating users. Total active sessions: ${userSessions.length}`);
     console.log('\nTesting sessions are unique:');
