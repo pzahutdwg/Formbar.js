@@ -3,6 +3,7 @@ const tough = require('tough-cookie');
 const cheerio = require('cheerio');
 const io = require('socket.io-client');
 const { listenArrayEvents } = require('chart.js/helpers');
+const { log } = require('winston');
 
 const URL = 'http://localhost:420';
 // const URL = 'http://172.16.3.130:420';
@@ -10,11 +11,11 @@ const classID = '93nt';
 // const classID = 'p6kb'
 const guestCount = 24
 const userSessions = [];
-const teacherAPIkey = null
-const classIDnumber = null
+const teacherAPIkey = '9df608306d132f1e2660344bcedac4beab01f080f1b7052da7ec50d4cdb15197'
+const classIDnumber = 2
 
 // Get Students
-function students() {
+async function students() {
     let reqOptions =
     {
         method: 'GET',
@@ -23,20 +24,14 @@ function students() {
             'Content-Type': 'application/json'
         }
     };
-
-    fetch(`${URL}/api/${classIDnumber}/students`, reqOptions)
-        .then((response) => {
-            // Convert received data to JSON
-            return response.json();
-        })
-        .then((data) => {
-            // Log the data if the request is successful
-            console.log(data);
-        })
-        .catch((err) => {
-            // If there's a problem, handle it...
-            if (err) console.log('connection closed due to errors', err);
-        });
+    try {
+        const response = await fetch(`${URL}/api/class/${classIDnumber}`, reqOptions);
+        const data = await response.json();
+        return data;
+    } catch (err) {
+        console.log('connection closed due to errors', err);
+        return null;
+    }
 }
 process.on('unhandledRejection', (reason, promise) => {
     console.log('Unhandled Rejection at:', promise, 'reason:', reason);
@@ -221,6 +216,7 @@ function printCommands() {
     console.log('  help <count> - "count" users request help');
     console.log('  randAction - Users make random actions');
     console.log('  classData - Prints the classroomData object');
+    console.log('  students - Logs a get request using the teacher API to /class');
 
     console.log('  exit - Exit the program\n');
 }
@@ -405,6 +401,8 @@ async function simulatePollInteractions() {
             } else {
                 console.log('No active user sessions.');
             }
+        } else if (command == 'students') {
+            console.log(await students())
         } else if (command.trim() !== '') {
             console.log('Invalid command. Here are the available commands:')
             printCommands()
@@ -454,6 +452,10 @@ async function createGuests(count) {
         console.log(`Session ${index + 1}: ${session.name}, Cookie count: ${cookies.length}`);
         printClassAndStudentInfo(session);
     });
+    if (!inited) {
+        const studentData = await students();
+        console.log('Students', studentData);
+    }
     if (!inited) await simulatePollInteractions();
     inited = true
     if (userSessions.length > 0) {
