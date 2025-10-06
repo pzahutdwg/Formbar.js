@@ -2,6 +2,7 @@ const axios = require('axios').default;
 const tough = require('tough-cookie');
 const cheerio = require('cheerio');
 const io = require('socket.io-client');
+const { listenArrayEvents } = require('chart.js/helpers');
 
 const URL = 'http://localhost:420';
 // const URL = 'http://172.16.3.130:420';
@@ -9,7 +10,34 @@ const classID = '93nt';
 // const classID = 'p6kb'
 const guestCount = 24
 const userSessions = [];
+const teacherAPIkey = null
+const classIDnumber = null
 
+// Get Students
+function students() {
+    let reqOptions =
+    {
+        method: 'GET',
+        headers: {
+            'API': teacherAPIkey,
+            'Content-Type': 'application/json'
+        }
+    };
+
+    fetch(`${URL}/api/${classIDnumber}/students`, reqOptions)
+        .then((response) => {
+            // Convert received data to JSON
+            return response.json();
+        })
+        .then((data) => {
+            // Log the data if the request is successful
+            console.log(data);
+        })
+        .catch((err) => {
+            // If there's a problem, handle it...
+            if (err) console.log('connection closed due to errors', err);
+        });
+}
 process.on('unhandledRejection', (reason, promise) => {
     console.log('Unhandled Rejection at:', promise, 'reason:', reason);
 });
@@ -187,12 +215,14 @@ function printCommands() {
     console.log('  debug - Show debug info for first user session');
     console.log('  test - Test basic server connectivity');
     console.log('  stop - Stop the simulation');
-    console.log('  exit - Exit the program');
     console.log('  leave <count> - "count" users leave the active class')
     console.log('  more <count> - "count" users join the room');
     console.log('  break <count> - "count" users request a break');
     console.log('  help <count> - "count" users request help');
-    console.log('  randAction - Users make random actions\n');
+    console.log('  randAction - Users make random actions');
+    console.log('  classData - Prints the classroomData object');
+
+    console.log('  exit - Exit the program\n');
 }
 
 /*
@@ -210,7 +240,7 @@ async function simulatePollInteractions() {
         console.log('No active user sessions available for poll interactions');
         return;
     }
-    
+
     printCommands()
 
     process.stdin.setEncoding('utf8');
@@ -233,7 +263,16 @@ async function simulatePollInteractions() {
         } else if
             (command === 'options') {
             if (userSessions.length > 0) {
-                console.log(await getPollOptions(userSessions[0]))
+                let data = await printClassAndStudentInfo(userSessions[0]);
+                if (data.poll.status) {
+                    latestPollOptions = Object.keys(data.poll.responses);
+                    console.log('Poll options:')
+                    latestPollOptions.forEach(o => process.stdout.write(`${o} `))
+                    console.log()
+                } else {
+                    latestPollOptions = [];
+                    console.log('No active poll')
+                }
             }
 
         } else if (command.startsWith('single ')) {
@@ -253,22 +292,23 @@ async function simulatePollInteractions() {
             const successful = results.filter(r => r).length;
             console.log(`Vote completed: ${successful}/${userSessions.length} users voted successfully`);
 
-        } else if (command.startsWith('random ')) {
-            const optionsStr = command.substring(7).trim();
-            const options = optionsStr.split(',').map(opt => opt.trim());
-
-            if (options.length === 0) {
-                console.log('Please provide options separated by commas (e.g., "random True,False")');
+        } else if (command.startsWith('random')) {
+            let optionsStr = command.substring(6).trim();
+            let options;
+            if (optionsStr) {
+                options = optionsStr.split(',').map(opt => opt.trim());
+            } else {
+                options = latestPollOptions;
+            }
+            if (!options || options.length === 0) {
+                console.log('No poll options available. Run "options" first or provide options.');
                 return;
             }
-
             console.log(`Making users vote randomly from options: ${options.join(', ')}`);
-            // Vote in parallel
             const votePromises = userSessions.map(session => {
                 const randomOption = options[Math.floor(Math.random() * options.length)];
                 return submitPollResponse(session, randomOption);
             });
-
             const results = await Promise.all(votePromises);
             const successful = results.filter(r => r).length;
             console.log(`Random vote completed: ${successful}/${userSessions.length} users voted successfully`);
@@ -328,6 +368,16 @@ async function simulatePollInteractions() {
 
         } else if (command == 'randAction') {
             for (let session of userSessions) {
+                // If there is an active poll, remove the current vote
+                let data = await printClassAndStudentInfo(session);
+                if (data.poll && data.poll.status) {
+                    await submitPollResponse(session, 'remove');
+                    // console.log(`${session.name} voted for ${randomOption}`);
+                }
+
+                // End the current break
+                session.socket.emit('endBreak')
+
                 const action = Math.floor(Math.random() * 10) + 1;
                 if (action == 9) {
                     session.socket.emit('requestBreak', `${session.name} wants to take a break.`)
@@ -336,9 +386,27 @@ async function simulatePollInteractions() {
                     session.socket.emit('help', `${session.name} needs help.`)
                     console.log(`${session.name} needs help.`);
                 }
+                if (action >= 2) {
+                    let data = await printClassAndStudentInfo(session);
+                    if (data.poll && data.poll.status) {
+                        const options = Object.keys(data.poll.responses);
+                        if (options.length > 0) {
+                            const randomOption = options[Math.floor(Math.random() * options.length)];
+                            await submitPollResponse(session, randomOption);
+                            console.log(`${session.name} voted for ${randomOption}`);
+                        }
+                    }
+                }
+            }
+        } else if (command == 'classData') {
+            if (userSessions.length > 0) {
+                let data = await printClassAndStudentInfo(userSessions[0]);
+                console.log('Classroom Data:', JSON.stringify(data, null, 2));
+            } else {
+                console.log('No active user sessions.');
             }
         } else if (command.trim() !== '') {
-            console.log('Invalid command. Here are the available commands:') 
+            console.log('Invalid command. Here are the available commands:')
             printCommands()
         }
     });
@@ -384,10 +452,56 @@ async function createGuests(count) {
     userSessions.forEach((session, index) => {
         const cookies = session.jar.getCookiesSync(URL);
         console.log(`Session ${index + 1}: ${session.name}, Cookie count: ${cookies.length}`);
+        printClassAndStudentInfo(session);
     });
     if (!inited) await simulatePollInteractions();
     inited = true
+    if (userSessions.length > 0) {
+        setupPollOptionsListener(userSessions[0]);
+    }
+}
+
+function setupPollOptionsListener(session) {
+    if (!session.socket) return;
+    session.socket.on('classUpdate', (classroomData) => {
+        if (classroomData.poll && classroomData.poll.status) {
+            const newOptions = Object.keys(classroomData.poll.responses);
+            if (classroomData.poll.prompt != prevprompt && classroomData.poll) {
+                console.log('Poll options updated. New poll:', classroomData.poll.prompt);
+                newOptions.forEach(o => process.stdout.write(`${o} `))
+                console.log()
+                prevprompt = classroomData.poll.prompt
+            }
+        } else {
+            latestPollOptions = [];
+            prevprompt = ""
+        }
+    });
+}
+
+async function printClassAndStudentInfo(session) {
+    if (!session.socket) return;
+    return new Promise((resolve) => {
+        session.socket.once('classUpdate', (classroomData) => {
+            // console.log('\nClass Info for', session.name);
+            // console.log('Class Name:', classroomData.className);
+            // console.log('Class Code:', classroomData.key);
+            if (classroomData.students) {
+                console.log('Available student keys:', Object.keys(classroomData.students));
+            }
+            // const student = classroomData.students && classroomData.students[session.name];
+            // if (student) {
+            //     console.log('Student Info:', student);
+            // } else {
+            //     console.log('Student info not found for', session.name);
+            // }
+            resolve(classroomData);
+        });
+        session.socket.emit('classUpdate');
+    });
 }
 
 let inited
+let latestPollOptions = [];
+let prevprompt = ""
 createGuests(guestCount).catch(err => console.error('Fatal error:', err));
