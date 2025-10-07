@@ -5,11 +5,11 @@ const io = require('socket.io-client');
 const { listenArrayEvents } = require('chart.js/helpers');
 const { log } = require('winston');
 
-const URL = 'http://localhost:420';
+const URL = 'https://formbeta.yorktechapps.com';
 // const URL = 'http://172.16.3.130:420';
-const classID = '93nt';
+const classID = 'hpk8';
 // const classID = 'p6kb'
-const guestCount = 24
+const guestCount = 45
 const userSessions = [];
 const teacherAPIkey = '9df608306d132f1e2660344bcedac4beab01f080f1b7052da7ec50d4cdb15197'
 const classIDnumber = 2
@@ -25,7 +25,7 @@ async function students() {
         }
     };
     try {
-        const response = await fetch(`${URL}/api/class/${classIDnumber}`, reqOptions);
+        const response = await fetch(`${URL}/api/class/${classIDnumber}/students`, reqOptions);
         const data = await response.json();
         return data;
     } catch (err) {
@@ -53,7 +53,6 @@ async function createFakeGuest(displayName) {
     }));
 
     try {
-        await new Promise(resolve => setTimeout(resolve, Math.random() * 0)); //! Maybe change this later
         const loginResponse = await client.post(
             `${URL}/login`,
             new URLSearchParams({ displayName, loginType: 'guest' }),
@@ -135,14 +134,14 @@ async function getPollOptions(session) {
 
 async function submitPollResponse(session, optionId) {
     try {
-        // console.log(`  📊 ${session.name} attempting to vote for option ${optionId}`);
         if (!session.socket) {
             console.log(`  ✗ ${session.name} has no socket connection!`);
             return false;
         }
-        // Emit pollResp via socket.io
+        // Remove previous vote
+        session.socket.emit('pollResp', 'remove', "");
+        // Emit new vote
         session.socket.emit('pollResp', optionId, "");
-        // console.log(`  ✓ ${session.name} emitted pollResp for option ${optionId}`);
         return true;
     } catch (error) {
         console.log(`  ✗ ${session.name} failed to vote:`);
@@ -217,7 +216,8 @@ function printCommands() {
     console.log('  randAction - Users make random actions');
     console.log('  classData - Prints the classroomData object');
     console.log('  students - Logs a get request using the teacher API to /class');
-
+    console.log('  kick <name> - Kicks the student with the name <name>.');
+    
     console.log('  exit - Exit the program\n');
 }
 
@@ -403,6 +403,29 @@ async function simulatePollInteractions() {
             }
         } else if (command == 'students') {
             console.log(await students())
+
+            } else if (command.startsWith('kick ')) {
+                const name = command.substring(5).trim();
+                if (!name) {
+                    console.log('Please provide a student name.');
+                    return;
+                }
+                const studentList = await students();
+                if (!studentList || !Array.isArray(studentList)) {
+                    console.log('Could not fetch student list.');
+                    return;
+                }
+                const student = studentList.find(s => s.displayName === name);
+                if (!student) {
+                    console.log(`Student "${name}" not found.`);
+                    return;
+                }
+                if (userSessions.length > 0 && userSessions[0].socket) {
+                    userSessions[0].socket.emit('classKickUser', student.id);
+                    console.log(`Kick command sent for ${name} (email/id: ${student.id})`);
+                } else {
+                    console.log('No active user session to send kick command.');
+                }
         } else if (command.trim() !== '') {
             console.log('Invalid command. Here are the available commands:')
             printCommands()
@@ -453,8 +476,8 @@ async function createGuests(count) {
         printClassAndStudentInfo(session);
     });
     if (!inited) {
-        const studentData = await students();
-        console.log('Students', studentData);
+        // const studentData = await students();
+        // console.log('Students', studentData);
     }
     if (!inited) await simulatePollInteractions();
     inited = true
@@ -472,6 +495,7 @@ function setupPollOptionsListener(session) {
                 console.log('Poll options updated. New poll:', classroomData.poll.prompt);
                 newOptions.forEach(o => process.stdout.write(`${o} `))
                 console.log()
+                latestPollOptions = Object.keys(classroomData.poll.responses);
                 prevprompt = classroomData.poll.prompt
             }
         } else {
