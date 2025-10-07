@@ -5,11 +5,11 @@ const io = require('socket.io-client');
 const { listenArrayEvents } = require('chart.js/helpers');
 const { log } = require('winston');
 
-const URL = 'https://formbeta.yorktechapps.com';
-// const URL = 'http://172.16.3.130:420';
-const classID = 'hpk8';
-// const classID = 'p6kb'
-const guestCount = 45
+// const URL = 'https://formbeta.yorktechapps.com';
+const URL = 'http://localhost:420';
+// const classID = 'hpk8';
+const classID = '93nt'
+const guestCount = 24
 const userSessions = [];
 const teacherAPIkey = '9df608306d132f1e2660344bcedac4beab01f080f1b7052da7ec50d4cdb15197'
 const classIDnumber = 2
