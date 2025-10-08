@@ -4,6 +4,7 @@ const cheerio = require('cheerio');
 const io = require('socket.io-client');
 const { listenArrayEvents } = require('chart.js/helpers');
 const { log } = require('winston');
+const { userSockets } = require('../modules/socketUpdates');
 
 // const URL = 'https://formbeta.yorktechapps.com';
 const URL = 'http://localhost:420';
@@ -11,8 +12,12 @@ const URL = 'http://localhost:420';
 const classID = '93nt'
 const guestCount = 24
 const userSessions = [];
-const teacherAPIkey = '9df608306d132f1e2660344bcedac4beab01f080f1b7052da7ec50d4cdb15197'
+
 const classIDnumber = 2
+
+const teacherEmail = 'tb@a.a'
+const teacherPass = 'testBot'
+const teacherAPIkey = '9df608306d132f1e2660344bcedac4beab01f080f1b7052da7ec50d4cdb15197'
 
 // Get Students
 async function students() {
@@ -42,17 +47,31 @@ function makeDisplayName() {
     return `guest${nextGuestId++}`.padEnd(5, '_');
 }
 
+/*
+ ::::::::  :::    ::: :::::::::: :::::::: :::::::::::      :::::::::: :::    ::: ::::    :::  :::::::: ::::::::::: ::::::::::: ::::::::  ::::    :::
+:+:    :+: :+:    :+: :+:       :+:    :+:    :+:          :+:        :+:    :+: :+:+:   :+: :+:    :+:    :+:         :+:    :+:    :+: :+:+:   :+:
++:+        +:+    +:+ +:+       +:+           +:+          +:+        +:+    +:+ :+:+:+  +:+ +:+           +:+         +:+    +:+    +:+ :+:+:+  +:+
+:#:        +#+    +:+ +#++:++#  +#++:++#++    +#+          :#::+::#   +#+    +:+ +#+ +:+ +#+ +#+           +#+         +#+    +#+    +:+ +#+ +:+ +#+
++#+   +#+# +#+    +#+ +#+              +#+    +#+          +#+        +#+    +#+ +#+  +#+#+# +#+           +#+         +#+    +#+    +#+ +#+  +#+#+#
+#+#    #+# #+#    #+# #+#       #+#    #+#    #+#          #+#        #+#    #+# #+#   #+#+# #+#    #+#    #+#         #+#    #+#    #+# #+#   #+#+#
+ ########   ########  ########## ########     ###          ###         ########  ###    ####  ########     ###     ########### ########  ###    ####
+*/
+
+// Creates a fake guest user, logs them in, joins the class, and connects their socket
 async function createFakeGuest(displayName) {
+    // Import axios-cookiejar-support for cookie management
     const { wrapper } = await import('axios-cookiejar-support');
     const jar = new tough.CookieJar();
+    // Create an axios client with cookie jar support
     const client = wrapper(axios.create({
         jar,
         withCredentials: true,
-        timeout: 0, //! Maybe change this later
-        validateStatus: (status) => status < 500
+        timeout: 0, // No timeout for requests
+        validateStatus: (status) => status < 500 // Accept all statuses below 500
     }));
 
     try {
+        // Step 1: Log in as guest
         const loginResponse = await client.post(
             `${URL}/login`,
             new URLSearchParams({ displayName, loginType: 'guest' }),
@@ -62,9 +81,8 @@ async function createFakeGuest(displayName) {
             console.log(`⚠ ${displayName} login returned status ${loginResponse.status}`);
             return null;
         }
-        // console.log(`✓ ${displayName} logged in (status ${loginResponse.status})`);
-
-        await new Promise(resolve => setTimeout(resolve, 0));
+        // Step 2: Join the class
+        await new Promise(resolve => setTimeout(resolve, 0)); // Small delay
         const classResponse = await client.post(
             `${URL}/selectClass`,
             new URLSearchParams({ key: classID }),
@@ -76,33 +94,38 @@ async function createFakeGuest(displayName) {
         }
         console.log(`  → ${displayName} joined class (status ${classResponse.status})`);
 
+        // Step 3: Access the student dashboard page
         const studentPage = await client.get(`${URL}/student`);
         if (studentPage.status !== 200) {
             console.log(`⚠ ${displayName} /student page returned status ${studentPage.status}`);
             return null;
         }
+        // Check if the page looks like a student dashboard
         if (!studentPage.data || (!studentPage.data.includes('Poll') && !studentPage.data.includes('poll'))) {
             console.log(`⚠ ${displayName} /student page does not look like a student dashboard`);
             return null;
         }
 
+        // Step 4: Ensure session cookie exists
         const cookies = jar.getCookiesSync(URL);
         if (!cookies.some(c => c.key.startsWith('connect'))) {
             console.log(`⚠ ${displayName} missing session cookie after login/join`);
             return null;
         }
 
+        // Step 5: Create session object and connect socket.io
         const session = { name: displayName, client, jar };
-        // Connect socket.io for this session
         session.socket = io(URL, {
             withCredentials: true,
             extraHeaders: {
                 Cookie: jar.getCookieStringSync(URL)
             }
         });
+        // Add session to global userSessions array
         userSessions.push(session);
         return session;
     } catch (error) {
+        // Log error details
         console.log(`✗ Error for ${displayName}:`, error.response?.status || error.code || error.message);
         if (error.response?.data) {
             console.log(`  Error data:`, error.response.data.substring(0, 200));
@@ -111,23 +134,72 @@ async function createFakeGuest(displayName) {
     }
 }
 
-async function getPollOptions(session) {
+/*
+::::::::::: ::::::::::     :::      ::::::::  :::    ::: :::::::::: :::::::::
+    :+:     :+:          :+: :+:   :+:    :+: :+:    :+: :+:        :+:    :+:
+    +:+     +:+         +:+   +:+  +:+        +:+    +:+ +:+        +:+    +:+
+    +#+     +#++:++#   +#++:++#++: +#+        +#++:++#++ +#++:++#   +#++:++#:
+    +#+     +#+        +#+     +#+ +#+        +#+    +#+ +#+        +#+    +#+
+    #+#     #+#        #+#     #+# #+#    #+# #+#    #+# #+#        #+#    #+#
+    ###     ########## ###     ###  ########  ###    ### ########## ###    ###
+*/
+
+async function makeTeacher() {
+    const { wrapper } = await import('axios-cookiejar-support');
+    const jar = new tough.CookieJar();
+    const client = wrapper(axios.create({
+        jar,
+        withCredentials: true,
+        timeout: 0,
+        validateStatus: (status) => status < 500
+    }));
+
     try {
-        const response = await session.client.get(`${URL}/student`, {
-            responseType: 'text'
+        const loginResponse = await client.post(
+            `${URL}/login`,
+            new URLSearchParams({
+                route: 'login',
+                redirectURL: '',
+                displayName: '',
+                email: teacherEmail,
+                password: teacherPass,
+                loginType: 'login',
+                userType: 'user'
+            }),
+            { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+        );
+        if (loginResponse.status !== 200) {
+            console.log(`Teacher login returned status ${loginResponse.status}`);
+            return null;
+        }
+        console.log(`✓ Teacher logged in (status ${loginResponse.status})`);
+
+        // Join the class with the specified code
+        const classResponse = await client.post(
+            `${URL}/selectClass`,
+            new URLSearchParams({ key: classID }),
+            { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+        );
+        if (classResponse.status !== 200) {
+            console.log(`Teacher class join returned status ${classResponse.status}`);
+            return null;
+        }
+        console.log(`✓ Teacher joined class (status ${classResponse.status})`);
+
+        // Connect teacher socket
+        teacherSessionSocket = io(URL, {
+            withCredentials: true,
+            extraHeaders: {
+                Cookie: jar.getCookieStringSync(URL)
+            }
         });
-        const $ = cheerio.load(response.data);
-        const options = [];
-        // Try to select poll buttons more flexibly if the name attribute is not present
-        $('button[name="poll"], button.poll, input[type="radio"][name="poll"]').each((_, el) => {
-            options.push({
-                id: $(el).attr('id') || $(el).val() || $(el).attr('value'),
-                text: $(el).text().trim() || $(el).val() || $(el).attr('value')
-            });
-        });
-        return options.length ? options : 'No poll options found';
+
+        return { client, jar };
     } catch (error) {
-        console.error("Error fetching poll options:", error);
+        console.log(`✗ Error logging in teacher:`, error.response?.status || error.code || error.message);
+        if (error.response?.data) {
+            console.log(`  Error data:`, error.response.data.substring(0, 200));
+        }
         return null;
     }
 }
@@ -217,7 +289,7 @@ function printCommands() {
     console.log('  classData - Prints the classroomData object');
     console.log('  students - Logs a get request using the teacher API to /class');
     console.log('  kick <name> - Kicks the student with the name <name>.');
-    
+
     console.log('  exit - Exit the program\n');
 }
 
@@ -317,6 +389,17 @@ async function simulatePollInteractions() {
             }
             console.log(`Making ${count} users leave the room.`);
             let toRemove = Math.min(count, userSessions.length);
+            if (count >= userSessions.length) {
+                // Find the teacher session and log them out
+                if (teacherSessionSocket && teacherSessionSocket.connected) {
+                    teacherSessionSocket.emit('logout');
+                    console.log('Teacher logged out.');
+                }
+                const teacherSessionIndex = userSessions.findIndex(s => s.name === 'teacher');
+                if (teacherSessionIndex !== -1) {
+                    userSessions.splice(teacherSessionIndex, 1);
+                }
+            }
             while (toRemove-- > 0) {
                 const session = userSessions[0];
                 if (session && session.socket) {
@@ -404,28 +487,36 @@ async function simulatePollInteractions() {
         } else if (command == 'students') {
             console.log(await students())
 
-            } else if (command.startsWith('kick ')) {
-                const name = command.substring(5).trim();
-                if (!name) {
-                    console.log('Please provide a student name.');
-                    return;
-                }
-                const studentList = await students();
-                if (!studentList || !Array.isArray(studentList)) {
-                    console.log('Could not fetch student list.');
-                    return;
-                }
-                const student = studentList.find(s => s.displayName === name);
-                if (!student) {
-                    console.log(`Student "${name}" not found.`);
-                    return;
-                }
-                if (userSessions.length > 0 && userSessions[0].socket) {
-                    userSessions[0].socket.emit('classKickUser', student.id);
-                    console.log(`Kick command sent for ${name} (email/id: ${student.id})`);
+        } else if (command.startsWith('kick ')) {
+            const name = command.substring(5).trim();
+            if (!name) {
+                console.log('Please provide a student name.');
+                return;
+            }
+            const studentList = await students();
+            if (!studentList || !Array.isArray(studentList)) {
+                console.log('Could not fetch student list.');
+                return;
+            }
+            const student = studentList.find(s => s.displayName === name);
+            if (!student) {
+                console.log(`Student "${name}" not found.`);
+                return;
+            }
+            if (userSessions.length > 0 && userSessions[0].socket) {
+                if (teacherSessionSocket) {
+                    if (teacherSessionSocket.connected) {
+                        teacherSessionSocket.emit('classKickUser', student.id);
+                        console.log(`Kick command sent for ${name} (email/id: ${student.id})`);
+                    } else {
+                        console.log('Teacher socket is not connected. Cannot send kick command.');
+                    }
                 } else {
-                    console.log('No active user session to send kick command.');
+                    console.log('teacherSessionSocket is undefined. Cannot send kick command.');
                 }
+            } else {
+                console.log('No active teacher session to send kick command.');
+            }
         } else if (command.trim() !== '') {
             console.log('Invalid command. Here are the available commands:')
             printCommands()
@@ -436,7 +527,7 @@ async function simulatePollInteractions() {
  ::::::::  :::::::::  ::::::::::     ::: ::::::::::: ::::::::::
 :+:    :+: :+:    :+: :+:          :+: :+:   :+:     :+:
 +:+        +:+    +:+ +:+         +:+   +:+  +:+     +:+
-+#+        +#++:++#:  +#++:++#   +#++:++#++: +#+     +#++:++#
+#+#        +#++:++#:  +#++:++#   +#++:++#++: +#+     +#++:++#
 +#+        +#+    +#+ +#+        +#+     +#+ +#+     +#+
 #+#    #+# #+#    #+# #+#        #+#     #+# #+#     #+#
  ########  ###    ### ########## ###     ### ###     ##########
@@ -461,13 +552,23 @@ async function createGuests(count) {
                 console.log(`Failed to create guest${start + index}:`, result.reason);
             }
         });
-
         // Timeout between batches
-
         // if (added < count) {
         //     await new Promise(resolve => setTimeout(resolve, 1000));
         // }
     }
+
+    // Sign in teacher after guests are created
+    const teacherSession = await makeTeacher();
+    if (teacherSession) {
+        console.log('Teacher signed in.');
+        teacherSession.name = 'teacher';
+        console.log(teacherSession)
+        userSessions.push(teacherSession);
+    } else {
+        console.log('Failed to sign in teacher.');
+    }
+
     console.log(`\nFinished creating users. Total active sessions: ${userSessions.length}`);
     console.log('\nTesting sessions are unique:');
     userSessions.forEach((session, index) => {
