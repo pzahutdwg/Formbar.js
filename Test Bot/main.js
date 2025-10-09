@@ -1,10 +1,6 @@
 const axios = require('axios').default;
 const tough = require('tough-cookie');
-const cheerio = require('cheerio');
 const io = require('socket.io-client');
-const { listenArrayEvents } = require('chart.js/helpers');
-const { log } = require('winston');
-const { userSockets } = require('../modules/socketUpdates');
 
 // const URL = 'https://formbeta.yorktechapps.com';
 const URL = 'http://localhost:420';
@@ -14,6 +10,7 @@ const guestCount = 24
 const userSessions = [];
 
 const classIDnumber = 2
+let teacherSessionSocket
 
 const teacherEmail = 'tb@a.a'
 const teacherPass = 'testBot'
@@ -38,6 +35,26 @@ async function students() {
         return null;
     }
 }
+
+async function poll() {
+    let reqOptions =
+    {
+        method: 'GET',
+        headers: {
+            'API': teacherAPIkey,
+            'Content-Type': 'application/json'
+        }
+    };
+    try {
+        const response = await fetch(`${URL}/api/class/${classIDnumber}`, reqOptions);
+        const data = await response.json();
+        return data;
+    } catch (err) {
+        console.log('connection closed due to errors', err);
+        return null;
+    }
+}
+
 process.on('unhandledRejection', (reason, promise) => {
     console.log('Unhandled Rejection at:', promise, 'reason:', reason);
 });
@@ -213,7 +230,14 @@ async function submitPollResponse(session, optionId) {
         // Remove previous vote
         session.socket.emit('pollResp', 'remove', "");
         // Emit new vote
-        session.socket.emit('pollResp', optionId, "");
+        let textPoll = await poll()
+        textPoll = textPoll.poll.allowTextResponses
+        if (!textPoll) {
+            session.socket.emit('pollResp', optionId, "");
+        } else {
+            // console.log('text')
+            session.socket.emit('pollResp', optionId, session.name);
+        }
         return true;
     } catch (error) {
         console.log(`  ✗ ${session.name} failed to vote:`);
@@ -289,6 +313,9 @@ function printCommands() {
     console.log('  classData - Prints the classroomData object');
     console.log('  students - Logs a get request using the teacher API to /class');
     console.log('  kick <name> - Kicks the student with the name <name>.');
+    console.log('  start - Starts the class.');
+    console.log('  end - Ends the class.');
+    console.log('  poll - Returns this class\'s poll object.');
 
     console.log('  exit - Exit the program\n');
 }
@@ -381,6 +408,30 @@ async function simulatePollInteractions() {
             const successful = results.filter(r => r).length;
             console.log(`Random vote completed: ${successful}/${userSessions.length} users voted successfully`);
 
+        } else if (command === 'leave all') {
+            // Leave all users (set count to a very large number)
+            const count = 9999999;
+            console.log(`Making all users leave the room.`);
+            let toRemove = Math.min(count, userSessions.length);
+            if (count >= userSessions.length) {
+                // Find the teacher session and log them out
+                if (teacherSessionSocket && teacherSessionSocket.connected) {
+                    teacherSessionSocket.emit('logout');
+                    console.log('Teacher logged out.');
+                }
+                const teacherSessionIndex = userSessions.findIndex(s => s.name === 'teacher');
+                if (teacherSessionIndex !== -1) {
+                    userSessions.splice(teacherSessionIndex, 1);
+                }
+            }
+            while (toRemove-- > 0) {
+                const session = userSessions[0];
+                if (session && session.socket) {
+                    session.socket.emit('leaveRoom');
+                    console.log(`User ${session.name} left the room.`);
+                }
+                userSessions.shift();
+            }
         } else if (command.startsWith('leave ')) {
             const count = Number(command.substring(6).trim());
             if (!count) {
@@ -517,6 +568,17 @@ async function simulatePollInteractions() {
             } else {
                 console.log('No active teacher session to send kick command.');
             }
+
+        } else if (command == 'start') {
+            teacherSessionSocket.emit('startClass')
+
+        } else if (command == 'end') {
+            teacherSessionSocket.emit('endClass')
+        } else if (command == 'poll') {
+            let response = await poll()
+            const { studentsAllowedToVote, ...rest } = response.poll;
+            console.log(rest)
+
         } else if (command.trim() !== '') {
             console.log('Invalid command. Here are the available commands:')
             printCommands()
@@ -603,6 +665,9 @@ function setupPollOptionsListener(session) {
             latestPollOptions = [];
             prevprompt = ""
         }
+    });
+    session.socket.on('startClass', (res) => {
+        console.log(res)
     });
 }
 
