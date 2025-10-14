@@ -23,7 +23,7 @@ module.exports = {
                 logger.log('info', `[post /createClass] ip=(${req.ip}) session=(${JSON.stringify(req.session)})`)
                 logger.log('verbose', `[post /createClass] submittionType=(${submittionType}) className=(${className}) classId=(${classId})`)
 
-                async function makeClass(id, className, key, permissions, sharedPolls = [], pollHistory = [], tags, plugins = {}) {
+                async function makeClass(id, className, key, owner, permissions, sharedPolls = [], pollHistory = [], tags) {
                     try {
                         // Get the teachers session data ready to transport into new class
                         const user = classInformation.users[req.session.email]
@@ -49,7 +49,7 @@ module.exports = {
 
                         // Create classroom
                         if (!classInformation.classrooms[id]) {
-                            classInformation.classrooms[id] = new Classroom(id, className, key, permissions, sharedPolls, pollHistory, tags, plugins)
+                            classInformation.classrooms[id] = new Classroom(id, className, key, owner, permissions, sharedPolls, pollHistory, tags)
                         } else {
                             classInformation.classrooms[id].permissions = permissions
                             classInformation.classrooms[id].sharedPolls = sharedPolls
@@ -71,10 +71,19 @@ module.exports = {
                             if (classInformation.classrooms[id].students[email]) continue;
 
                             const student = classStudents[email];
-                            if (student.tags) {
-                                student.tags = student.tags.includes("Offline") ? student.tags : "Offline," + student.tags;
-                            } else {
-                                student.tags = "Offline";
+
+                            // Normalize student.tags to an array of strings
+                            if (!Array.isArray(student.tags)) {
+                                if (typeof student.tags === 'string' && student.tags.trim() !== '') {
+                                    student.tags = student.tags.split(',').map(t => t.trim()).filter(Boolean);
+                                } else {
+                                    student.tags = [];
+                                }
+                            }
+
+                            // Ensure 'Offline' is present exactly once at the front
+                            if (!student.tags.includes('Offline')) {
+                                student.tags.unshift('Offline');
                             }
 
                             student.displayName = student.displayName || student.email;
@@ -105,7 +114,7 @@ module.exports = {
 
                             logger.log('verbose', '[post /createClass] Added classroom to database')
 
-                            database.get('SELECT id, name, key, permissions, tags, plugins FROM classroom WHERE name = ? AND owner = ?', [className, req.session.userId], async (err, classroom) => {
+                            database.get('SELECT id, name, key, permissions, tags FROM classroom WHERE name = ? AND owner = ?', [className, req.session.userId], async (err, classroom) => {
                                 try {
                                     if (err) throw err
 
@@ -122,17 +131,17 @@ module.exports = {
                                         classroom.id,
                                         classroom.name,
                                         classroom.key,
+                                        req.session.userId,
                                         JSON.parse(classroom.permissions),
                                         [],
                                         [],
-                                        classroom.tags,
-                                        JSON.parse(classroom.plugins)
+                                        classroom.tags
                                     );
 
                                     if (makeClassStatus instanceof Error) throw makeClassStatus
                                     if (classInformation.users[req.session.email].permissions >= TEACHER_PERMISSIONS) {
                                         if (userSockets[req.session.email] && Object.keys(userSockets[req.session.email]).length > 0) {
-                                            emitToUser('reload', req.session.email, '/controlPanel');
+                                            emitToUser(req.session.email, 'reload', '/controlPanel');
                                             return;
                                         }
                                         res.redirect('/controlPanel')
@@ -189,11 +198,11 @@ module.exports = {
                                 classroom.id,
                                 classroom.name,
                                 classroom.key,
+                                classroom.owner,
                                 classroom.permissions,
                                 classroom.sharedPolls,
                                 classroom.pollHistory,
                                 classroom.tags,
-                                classroom.plugins
                             )
 
                             if (makeClassStatus instanceof Error)  {
@@ -202,7 +211,7 @@ module.exports = {
 
                             if (classInformation.users[req.session.email].permissions >= TEACHER_PERMISSIONS) {
                                 if (userSockets[req.session.email] && Object.keys(userSockets[req.session.email]).length > 0) {
-                                    emitToUser('reload', req.session.email, '/controlPanel');
+                                    emitToUser(req.session.email, 'reload', '/controlPanel');
                                     return;
                                 }
                                 res.redirect('/controlPanel')

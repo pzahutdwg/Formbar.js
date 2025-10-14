@@ -1,5 +1,3 @@
-const { request } = require("express")
-
 // Permissions range from highest to lowest
 const MANAGER_PERMISSIONS = 5
 const TEACHER_PERMISSIONS = 4
@@ -18,7 +16,18 @@ const PAGE_PERMISSIONS = {
 	selectclass: { permissions: GUEST_PERMISSIONS, classPage: false },
 	managerpanel: { permissions: MANAGER_PERMISSIONS, classPage: false },
 	downloaddatabase: { permissions: MANAGER_PERMISSIONS, classPage: false },
-	logs: { permissions: MANAGER_PERMISSIONS, classPage: false }
+	logs: { permissions: MANAGER_PERMISSIONS, classPage: false },
+	profile: { permissions: STUDENT_PERMISSIONS, classPage: false }
+}
+
+const CLASS_PERMISSIONS = {
+    GAMES: 'games',
+    CONTROL_POLLS: 'controlPolls',
+    MANAGE_STUDENTS: 'manageStudents',
+    MANAGE_CLASS: 'manageClass',
+    BREAK_AND_HELP: 'breakAndHelp',
+    AUXILIARY: 'auxiliary',
+    USER_DEFAULTS: 'userDefaults',
 }
 
 // Defines the default permissions for people in a class
@@ -27,20 +36,20 @@ const DEFAULT_CLASS_PERMISSIONS = {
 	controlPolls: MOD_PERMISSIONS,	
 	manageStudents: TEACHER_PERMISSIONS,
 	breakAndHelp: MOD_PERMISSIONS, // Approve break and help requests
-	manageClass: TEACHER_PERMISSIONS,	
-	lights: MOD_PERMISSIONS, // Control the FormPix lights
-	sounds: MOD_PERMISSIONS, // Control the FormPix sounds
-	userDefaults: GUEST_PERMISSIONS
+	manageClass: TEACHER_PERMISSIONS,
+    auxiliary: MOD_PERMISSIONS, // Controls the FormPix lights and sounds
+    userDefaults: GUEST_PERMISSIONS
 }
 
 // This defines global socket permissions that define who can use each socket event
 const GLOBAL_SOCKET_PERMISSIONS = {
 	permChange: MANAGER_PERMISSIONS,
+	verifyChange: MANAGER_PERMISSIONS,
 	deleteClass: TEACHER_PERMISSIONS,
 	getOwnedClasses: TEACHER_PERMISSIONS,
 	logout: GUEST_PERMISSIONS,
 	deleteUser: MANAGER_PERMISSIONS,
-	managerUpdate: MANAGER_PERMISSIONS,
+	banUser: MANAGER_PERMISSIONS,
 	ipUpdate: MANAGER_PERMISSIONS,
 	addIp: MANAGER_PERMISSIONS,
 	removeIp: MANAGER_PERMISSIONS,
@@ -50,9 +59,24 @@ const GLOBAL_SOCKET_PERMISSIONS = {
 	setTags: TEACHER_PERMISSIONS,
 	passwordUpdate: MANAGER_PERMISSIONS,
 	joinClass: GUEST_PERMISSIONS,
-	joinClassroom: GUEST_PERMISSIONS,
+	joinRoom: GUEST_PERMISSIONS,
 	getActiveClass: GUEST_PERMISSIONS,
 	refreshApiKey: STUDENT_PERMISSIONS,
+    refreshPin: STUDENT_PERMISSIONS,
+	transferDigipogs: STUDENT_PERMISSIONS,
+	transferResponse: STUDENT_PERMISSIONS,
+	awardDigipogs: TEACHER_PERMISSIONS,
+	awardDigipogsResponse: TEACHER_PERMISSIONS,
+	poolCreate: STUDENT_PERMISSIONS,
+	poolCreateResponse: STUDENT_PERMISSIONS,
+	poolDelete: STUDENT_PERMISSIONS,
+	poolDeleteResponse: STUDENT_PERMISSIONS,
+	poolAddMember: STUDENT_PERMISSIONS,
+	poolAddMemberResponse: STUDENT_PERMISSIONS,
+	poolRemoveMember: STUDENT_PERMISSIONS,
+	poolRemoveMemberResponse: STUDENT_PERMISSIONS,
+	poolPayout: STUDENT_PERMISSIONS,
+	poolPayoutResponse: STUDENT_PERMISSIONS,
 }
 
 // This defines socket permissions for the class that define who can use each socket event
@@ -61,13 +85,11 @@ const CLASS_SOCKET_PERMISSIONS = {
 	pollResp: STUDENT_PERMISSIONS,
 	requestBreak: STUDENT_PERMISSIONS,
 	endBreak: STUDENT_PERMISSIONS,
-	pollUpdate: STUDENT_PERMISSIONS,
-	vbUpdate: GUEST_PERMISSIONS,
 	vbTimer: GUEST_PERMISSIONS,
 	leaveClass: GUEST_PERMISSIONS,
-	leaveClassroom: GUEST_PERMISSIONS,
+	leaveRoom: GUEST_PERMISSIONS,
+    classUpdate: GUEST_PERMISSIONS,
 	setClassSetting: TEACHER_PERMISSIONS,
-	cpUpdate: MOD_PERMISSIONS,
 	setClassPermissionSetting: MANAGER_PERMISSIONS,
 	classPoll: MOD_PERMISSIONS,
 	timer: TEACHER_PERMISSIONS,
@@ -75,10 +97,6 @@ const CLASS_SOCKET_PERMISSIONS = {
 	getCanVote: STUDENT_PERMISSIONS,
 	changeCanVote: TEACHER_PERMISSIONS,
 	awardDigipogs: TEACHER_PERMISSIONS,
-	requestConversion: STUDENT_PERMISSIONS,
-	installPlugin: TEACHER_PERMISSIONS,
-	uninstallPlugin: TEACHER_PERMISSIONS,
-	swapPlugin: TEACHER_PERMISSIONS,
 	getPreviousPolls: TEACHER_PERMISSIONS,
 }
 
@@ -102,9 +120,6 @@ const CLASS_SOCKET_PERMISSION_MAPPER = {
 	classKickStudents: 'manageStudents',
 	approveBreak: 'breakAndHelp',
 	deleteTicket: 'breakAndHelp',
-	changePlugin: 'manageClass',
-	addPlugin: 'manageClass',
-	removePlugin: 'manageClass',
 	startClass: 'manageClass',
 	endClass: 'manageClass',
 	isClassActive: 'manageClass',
@@ -114,7 +129,6 @@ const CLASS_SOCKET_PERMISSION_MAPPER = {
 	classBanUser: 'manageStudents',
 	classUnbanUser: 'manageStudents',
 	awardDigipogs: 'userDefaults',
-	requestConversion: 'userDefaults',
 }
 
 module.exports = {
@@ -128,6 +142,7 @@ module.exports = {
 
 	// Page permissions
     PAGE_PERMISSIONS,
+    CLASS_PERMISSIONS,
     DEFAULT_CLASS_PERMISSIONS,
 
 	// Socket permissions

@@ -3,7 +3,7 @@ const { database } = require("../../modules/database")
 const { logger } = require("../../modules/logger")
 const { userSockets } = require("../../modules/socketUpdates")
 const { Student } = require("../../modules/student")
-const { getUserClass } = require("../../modules/user")
+const { getUserClass } = require("../../modules/user/user")
 
 module.exports = {
     order: 10,
@@ -31,7 +31,7 @@ module.exports = {
                                         userData.API,
                                         null,
                                         null,
-                                        userData.tags,
+                                        userData.tags ? userData.tags.split(',') : [],
                                         userData.displayName,
                                         false
                                     )
