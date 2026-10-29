@@ -16,7 +16,6 @@ async function ensureFormbarDeveloperPool() {
         "Formbar Developer pog pool. Accumulates from the 10% tax on digipog transactions.",
         0,
     ]);
-    await dbRun("INSERT INTO digipog_pool_users (pool_id, user_id, owner) VALUES (?, ?, ?)", [0, 1, 1]);
 }
 
 module.exports = {

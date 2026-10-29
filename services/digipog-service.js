@@ -176,7 +176,6 @@ async function createPool({ name, description = "", defaultShareholderId }) {
         iconUrl: null,
     });
     const poolId = await dbRun("INSERT INTO digipog_pools (name, description, amount, share_item) VALUES (?, ?, ?, ?)", [name, description, 0, shareItemId]);
-    await addUserToPool(poolId, defaultShareholderId);
     await addItemToInventory(defaultShareholderId, shareItemId, SHARES_PER_POOL);
     return poolId;
 }
@@ -190,16 +189,24 @@ async function deletePool(poolId) {
     let foo = await dbGet("SELECT share_item FROM digipog_pools WHERE id = ?", [poolId])
     await dbRun("DELETE FROM inventory WHERE item_id = ?", [foo.share_item])
     await dbRun("DELETE FROM digipog_pools WHERE id = ?", [poolId]);
-    await dbRun("DELETE FROM digipog_pool_users WHERE pool_id = ?", [poolId]);
 }
 
 /**
- * Get pools joined by a user.
+ * Get pools a user owns shares for.
  * @param {number} userId - userId.
- * @returns {Promise<Object[]>}
+ * @returns {Promise<number[]>}
  */
 async function getPoolsForUser(userId) {
-    return dbGetAll("SELECT pool_id FROM digipog_pool_users WHERE user_id = ?", [userId]);
+    let allItems = await dbGetAll('SELECT item_id FROM inventory WHERE user_id = ?', [userId])
+
+    let pools = []
+
+    for (let item of allItems) {
+        let pool = await dbGet('SELECT id AS pool_id FROM digipog_pools WHERE share_item = ?', [item.item_id])
+        if (pool) pools.push(pool)
+    }
+
+    return pools
 }
 
 /**
@@ -219,16 +226,13 @@ async function getPoolById(poolId) {
  * @returns {Promise<Object[]>}
  */
 async function getPoolsForUserPaginated(userId, limit = 20, offset = 0) {
-    const totalRow = await dbGet("SELECT COUNT(*) AS count FROM digipog_pool_users WHERE user_id = ?", [userId]);
-    const pools = await dbGetAll("SELECT pool_id, owner FROM digipog_pool_users WHERE user_id = ? ORDER BY pool_id DESC LIMIT ? OFFSET ?", [
-        userId,
-        limit,
-        offset,
-    ]);
+    const og = await getPoolsForUser(userId)
+
+    const pools = og.slice(offset, offset + limit)
 
     return {
-        pools,
-        total: totalRow ? totalRow.count : 0,
+        pools: pools,
+        total: og.length
     };
 }
 
@@ -238,7 +242,11 @@ async function getPoolsForUserPaginated(userId, limit = 20, offset = 0) {
  * @returns {Promise<Object[]>}
  */
 async function getUsersForPool(poolId) {
-    return dbGetAll("SELECT user_id, owner FROM digipog_pool_users WHERE pool_id = ?", [poolId]);
+    const shareItem = await dbGet('SELECT share_item FROM digipog_pools WHERE id = ?', [poolId])
+    const users = await dbGetAll('SELECT user_id FROM inventory WHERE item_id = ?', [shareItem])
+    let set = new Set(users) // TUCKER WHAT IS THIS
+    let arr = new Array(...set)
+    return arr.map(u => { return { user_id: u } }) // AAAAHHHHHH
 }
 
 /**
@@ -248,30 +256,11 @@ async function getUsersForPool(poolId) {
  * @returns {Promise<boolean>}
  */
 async function isUserInPool(userId, poolId) {
-    const row = await dbGet("SELECT 1 FROM digipog_pool_users WHERE pool_id = ? AND user_id = ? LIMIT 1", [poolId, userId]);
-    return !!row;
+    const shareItem = await dbGet('SELECT share_item FROM digipog_pools WHERE id = ?', [poolId])
+    const users = await dbGetAll('SELECT user_id FROM inventory WHERE item_id = ?', [shareItem])
+    return users.includes(userId)
 }
 
-/**
- * Checks whether a specific user is a founder of a pool.
- * @param {number} poolId - The pool to check.
- * @param {number} userId - The user to check.
- * @returns {Promise<boolean>} True if the user is a founder of the pool.
- */
-async function isPoolFoundedByUser(poolId, userId) {
-    // "owner" now represents founder because I didn't wish to change the API
-    const row = await dbGet("SELECT owner FROM digipog_pool_users WHERE pool_id = ? AND user_id = ? LIMIT 1", [poolId, userId]);
-    return !!(row && row.owner);
-}
-
-/**
- * Middleware-compatible founder check for pools.
- * @param {Object} req - Express request object
- * @returns {Promise<boolean>} Whether the requesting user founded the pool
- */
-function poolFounderCheck(req) {
-    return isPoolUserTopHolder(Number(req.params.id), req.user.id);
-}
 
 /**
  * Checks whether a specific user is a top shareholder of the pool
@@ -396,16 +385,6 @@ async function verifyPoolPin(poolId, pin) {
 }
 
 /**
- * Add a user to a pool.
- * @param {number} poolId - poolId.
- * @param {number} userId - userId.
- * @returns {Promise<void>}
- */
-async function addUserToPool(poolId, userId) {
-    return dbRun("INSERT OR REPLACE INTO digipog_pool_users (pool_id, user_id) VALUES (?, ?)", [poolId, userId]);
-}
-
-/**
  * Remove a user from a pool.
  * @param {number} poolId - poolId.
  * @param {number} userId - userId.
@@ -417,94 +396,12 @@ async function removeUserFromPool(poolId, userId) {
         const otherShareHolders = await dbGetAll("SELECT * FROM inventory WHERE item_id = ? AND user_id != ?", [shareItem, userId]);
         if (otherShareHolders.length === 0) {
             await dbRun("DELETE FROM digipog_pools WHERE id = ?", [poolId]);
-            await dbRun("DELETE FROM digipog_pool_users WHERE pool_id = ?", [poolId]);
             await dbRun("DELETE FROM inventory WHERE item_id = ?", [shareItem]);
             return;
         }
     }
     const { userShares } = await dbGet("SELECT SUM(quantity) AS userShares FROM inventory WHERE item_id = ? AND user_id = ?", [shareItem, userId]);
     if (userShares != null) await removeItemFromInventory(userId, shareItem, userShares);
-    await dbRun("DELETE FROM digipog_pool_users WHERE pool_id = ? AND user_id = ?", [poolId, userId]);
-}
-
-/**
- * Set pool ownership for a user.
- * @param {number} poolId - poolId.
- * @param {number} userId - userId.
- * @param {boolean} ownerFlag - ownerFlag.
- * @returns {Promise<void>}
- */
-async function setUserOwnerFlag(poolId, userId, ownerFlag) {
-    return dbRun("UPDATE digipog_pool_users SET owner = ? WHERE pool_id = ? AND user_id = ?", [ownerFlag ? 1 : 0, poolId, userId]);
-}
-
-/**
- * Add a member to a pool after permission checks.
- * @param {Object} membershipData - Membership data.
- * @param {number} membershipData.actingUserId - Acting user ID.
- * @param {number} membershipData.poolId - Pool ID.
- * @param {number} membershipData.userId - User ID to add.
- * @returns {Promise<Object>}
- */
-async function addMemberToPool({ actingUserId, poolId, userId }) {
-    if (!Number.isInteger(poolId) || poolId < 0) {
-        return { success: false, message: "Invalid pool ID." };
-    }
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-        return { success: false, message: "Invalid user ID." };
-    }
-
-    const isOwner = await isPoolUserTopHolder(poolId, actingUserId);
-    if (!isOwner) {
-        return { success: false, message: "You do not own this pool." };
-    }
-
-    const userToAdd = await dbGet("SELECT * FROM users WHERE id = ?", [userId]);
-    if (!userToAdd) {
-        return { success: false, message: "User not found." };
-    }
-
-    const isInPool = await isUserInPool(userId, poolId);
-    if (isInPool) {
-        return { success: false, message: "User is already a member of this pool." };
-    }
-
-    await addUserToPool(poolId, userId);
-
-    return { success: true, message: "User added to pool successfully." };
-}
-
-/**
- * Remove a member from a pool after permission checks.
- * @param {Object} membershipData - Membership data.
- * @param {number} membershipData.actingUserId - Acting user ID.
- * @param {number} membershipData.poolId - Pool ID.
- * @param {number} membershipData.userId - User ID to remove.
- * @returns {Promise<Object>}
- */
-async function removeMemberFromPool({ actingUserId, poolId, userId }) {
-    if (!Number.isInteger(poolId) || poolId < 0) {
-        return { success: false, message: "Invalid pool ID." };
-    }
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-        return { success: false, message: "Invalid user ID." };
-    }
-
-    const isOwner = await isPoolUserTopHolder(poolId, actingUserId);
-    if (!isOwner) {
-        return { success: false, message: "You do not own this pool." };
-    }
-
-    const isInPool = await isUserInPool(userId, poolId);
-    if (!isInPool) {
-        return { success: false, message: "User is not a member of this pool." };
-    }
-
-    await removeUserFromPool(poolId, userId);
-
-    return { success: true, message: "User removed from pool successfully." };
 }
 
 /**
@@ -1448,15 +1345,10 @@ module.exports = {
     getPoolById,
     getTopHoldingPoolsForUser,
     isUserInPool,
-    poolFounderCheck,
     isPoolUserTopHolder,
     poolTopHolderCheck,
     updatePoolPin,
     verifyPoolPin,
-    addUserToPool,
     removeUserFromPool,
-    setUserOwnerFlag,
-    addMemberToPool,
-    removeMemberFromPool,
     payoutPool,
 };
