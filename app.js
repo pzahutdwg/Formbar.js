@@ -16,6 +16,17 @@ if (!fs.existsSync("database/database.db")) {
     return;
 }
 
+// Redis
+const { createClient } = require('redis')
+
+const redisClient = createClient({
+    url: process.env.REDIS_URL
+})
+
+redisClient.on('error', (err) => {
+    console.error('Redis client error:', err)
+})
+
 // Custom modules
 const authentication = require("@middleware/authentication.js");
 const { initSocketRoutes } = require("./sockets/init.js");
@@ -218,40 +229,51 @@ app.use((req, res, next) => {
 // Error handling middleware
 app.use(errorHandlerMiddleware);
 
-// Start the server
+async function startServer() {
 
-http.listen(settings.port, async () => {
-    // Ensure that the Formbar Developer Pool exists
-    try {
-        await ensureFormbarDeveloperPool();
-    } catch (err) {
-        console.error("Failed to ensure Formbar Developer Pool exists:", err);
-    }
+    // Connect to redis
+    await redisClient.connect()
+    console.log('Connected to redis client')
 
-    try {
-        await authentication.refreshIPAccessCache();
-    } catch (err) {
-        console.error("Failed to initialize IP access cache:", err);
-    }
+    // Start the server
+    http.listen(settings.port, async () => {
+        // Ensure that the Formbar Developer Pool exists
+        try {
+            await ensureFormbarDeveloperPool();
+        } catch (err) {
+            console.error("Failed to ensure Formbar Developer Pool exists:", err);
+        }
 
-    console.log(`Running on port: ${settings.port}`);
+        try {
+            await authentication.refreshIPAccessCache();
+        } catch (err) {
+            console.error("Failed to initialize IP access cache:", err);
+        }
 
-    const availableOIDCProviders = getAvailableProviders();
-    if (!settings.emailEnabled) {
-        console.log("Email functionality is disabled.");
-    }
+        console.log(`Running on port: ${settings.port}`);
 
-    if (!availableOIDCProviders.includes("google")) {
-        console.log("Google OAuth is not available. Please configure Google OAuth in the environment variables to enable Google login.");
-    }
+        const availableOIDCProviders = getAvailableProviders();
+        if (!settings.emailEnabled) {
+            console.log("Email functionality is disabled.");
+        }
 
-    if (!availableOIDCProviders.includes("microsoft")) {
-        console.log("Microsoft OAuth is not available. Please configure Microsoft OAuth in the environment variables to enable Microsoft login.");
-    }
+        if (!availableOIDCProviders.includes("google")) {
+            console.log("Google OAuth is not available. Please configure Google OAuth in the environment variables to enable Google login.");
+        }
 
-    if (!settings.emailEnabled || availableOIDCProviders.length < 2) {
-        console.log(
-            'To enable the disabled function(s), follow the related instructions under "Hosting Formbar.js Locally" in the Formbar wiki page at https://github.com/csmith1188/Formbar.js/wiki'
-        );
-    }
+        if (!availableOIDCProviders.includes("microsoft")) {
+            console.log("Microsoft OAuth is not available. Please configure Microsoft OAuth in the environment variables to enable Microsoft login.");
+        }
+
+        if (!settings.emailEnabled || availableOIDCProviders.length < 2) {
+            console.log(
+                'To enable the disabled function(s), follow the related instructions under "Hosting Formbar.js Locally" in the Formbar wiki page at https://github.com/csmith1188/Formbar.js/wiki'
+            );
+        }
+    });
+}
+
+startServer().catch((error) => {
+    console.error("Failed to start Formbar:", error);
+    process.exit(1);
 });
