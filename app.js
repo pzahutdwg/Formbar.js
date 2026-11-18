@@ -23,9 +23,11 @@ const redisClient = createClient({
     url: process.env.REDIS_URL
 })
 
-redisClient.on('error', (err) => {
-    console.error('Redis client error:', err)
-})
+if (process.env.REDIS_ENABLED === 'true') {
+    redisClient.on('error', (err) => {
+        console.error('Redis client error:', err)
+    })
+}
 
 // Custom modules
 const authentication = require("@middleware/authentication.js");
@@ -232,8 +234,10 @@ app.use(errorHandlerMiddleware);
 async function startServer() {
 
     // Connect to redis
-    await redisClient.connect()
-    console.log('Connected to redis client')
+    if (process.env.REDIS_ENABLED === 'true') {
+        await redisClient.connect()
+        console.log('Connected to redis client')
+    }
 
     // Start the server
     http.listen(settings.port, async () => {
