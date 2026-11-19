@@ -16,18 +16,10 @@ if (!fs.existsSync("database/database.db")) {
     return;
 }
 
-// Redis
-const { createClient } = require('redis')
+const { initRedis } = require("@modules/redis.js");
 
-const redisClient = createClient({
-    url: process.env.REDIS_URL
-})
-
-if (process.env.REDIS_ENABLED === 'true') {
-    redisClient.on('error', (err) => {
-        console.error('Redis client error:', err)
-    })
-}
+// Init Redis
+initRedis()
 
 // Custom modules
 const authentication = require("@middleware/authentication.js");

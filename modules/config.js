@@ -103,6 +103,7 @@ function getConfig() {
         publicKey: publicKey,
         privateKey: privateKey,
         frontendUrl: process.env.FRONTEND_URL,
+        redisEnabled: envFlag("REDIS_ENABLED"),
         envFlag,
     };
 }
