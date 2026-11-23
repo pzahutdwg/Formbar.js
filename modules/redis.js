@@ -31,7 +31,7 @@ function initRedis() {
  * @returns {boolean} - Returns the function's success.
  */
 async function redisSet(key, value, property = null) {
-    if (!config.redisEnabled || !redisClient) return false // Break if redis is disabled or null
+    if (!config.redisEnabled || !redisClient) return undefined // Break if redis is disabled or null
 
     if (property) {
         await redisClient.hSet(key, property, value)
@@ -57,7 +57,7 @@ async function redisSet(key, value, property = null) {
  * @returns {*} - Returns the value associated with the key.
  */
 async function redisGet(key, property = null) {
-    if (!config.redisEnabled || !redisClient) return false // Break if redis is disabled or null
+    if (!config.redisEnabled || !redisClient) return undefined // Break if redis is disabled or null
 
     let value
 
